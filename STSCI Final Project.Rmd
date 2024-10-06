@@ -1,0 +1,566 @@
+---
+title: "STSCI 4740 Final Project"
+output: html_notebook
+---
+
+# Exploratory
+
+```{r}
+wine=read.csv("Downloads/wine-quality-white-and-red.csv")
+head(wine)
+
+library(corrplot)
+
+mydata.cor = cor(as.matrix(wine[-1]), method = c("spearman"))
+corrplot(mydata.cor)
+
+wine<-wine[c('type','citric.acid','free.sulfur.dioxide','pH','fixed.acidity','residual.sugar','total.sulfur.dioxide','sulphates','alcohol','volatile.acidity','chlorides','quality')]
+```
+# Creating a separate dataset for white and for red wine
+# Making quality a binary response variable
+```{r}
+# Making quality a binary response variable. Turning problem into a classification problem instead of a regression. 
+wine$quality<-ifelse(wine$quality>5,1,0)
+
+white=subset(wine,type=="white")
+white=white[,-1]
+
+white_models=data.frame()
+
+red=subset(wine,type=="red")
+red=red[,-1]
+
+red_models=data.frame()
+```
+
+
+
+# White dataset subest selection for logistic regressions
+```{r}
+
+library(bestglm)
+library(dplyr)
+
+wine$quality<-as.factor(wine$quality)
+
+white.bglm <- white[, c("fixed.acidity","volatile.acidity","citric.acid","residual.sugar","chlorides","free.sulfur.dioxide","total.sulfur.dioxide","pH","sulphates","alcohol","quality")]
+white.bglm<-rename(white.bglm, y=quality)
+
+best.logit <- bestglm(white.bglm,
+                IC = "AIC",                 # Information criteria for
+                family=binomial,
+                method = "exhaustive")
+
+par(mfrow=c(2,2))
+plot((best.logit$Subsets)$AIC,xlab="Number of Variables",ylab="AIC",type='l')
+points((which.min((best.logit$Subsets)$AIC)-1),(best.logit$Subsets)$AIC[which.min((best.logit$Subsets)$AIC)-1],col="red",cex=2,pch=20)
+
+best.logit <- bestglm(white.bglm,
+                IC = "BIC",                 # Information criteria for
+                family=binomial,
+                method = "exhaustive")
+
+
+plot((best.logit$Subsets)$BIC,xlab="Number of Variables",ylab="BIC",type='l')
+points((which.min((best.logit$Subsets)$BIC)-1),(best.logit$Subsets)$BIC[which.min((best.logit$Subsets)$BIC)-1],col="red",cex=2,pch=20)
+
+
+
+# Looking at CV model
+best.logit <- bestglm(Xy = white.bglm, IC="CV", family=binomial)
+summary(best.logit$BestModel)
+best.logit$Subsets
+
+
+
+plot((best.logit$Subsets)$CV,xlab="Number of Variables",ylab="CV",type='l')
+points((which.min((best.logit$Subsets)$CV)-1),(best.logit$Subsets)$CV[which.min((best.logit$Subsets)$CV)-1],col="red",cex=2,pch=20)
+```
+#Compare these logistic models for white dataset
+```{r}
+library(pROC)
+
+set.seed(1)
+train_rows=sample(1:nrow(white), nrow(white)/2)
+train=white[train_rows, ]
+test=white[-train_rows, ]
+
+
+aic.fit=glm(quality~fixed.acidity+volatile.acidity+residual.sugar+free.sulfur.dioxide+total.sulfur.dioxide+sulphates+alcohol, family=binomial, data=train)
+test$aic.probs = predict(aic.fit, newdata=test, type="response")
+test$aic.predict<-ifelse(test$aic.probs>0.5,1,0)
+table(test$aic.predict, test$quality)
+
+test_roc = roc(test$quality ~ test$aic.predict, plot = TRUE, print.auc = TRUE)
+aic_auc<-test_roc$auc
+cat('testerrorrate for aic:',1-mean(test$aic.predict==test$quality),'\n')
+
+
+bic.fit=glm(quality~fixed.acidity+volatile.acidity+residual.sugar+free.sulfur.dioxide+sulphates+alcohol, family=binomial, data=train)
+test$bic.probs = predict(bic.fit, newdata=test, type="response")
+test$bic.predict<-ifelse(test$bic.probs>0.5,1,0)
+table(test$bic.predict, test$quality)
+
+test_roc = roc(test$quality ~ test$bic.predict, plot = TRUE, print.auc = TRUE)
+bic_auc<-test_roc$auc
+cat('testerrorrate for bic:',1-mean(test$bic.predict==test$quality),'\n')
+
+cv.fit=glm(quality~fixed.acidity+volatile.acidity+chlorides+free.sulfur.dioxide+sulphates+alcohol, family=binomial, data=train)
+test$cv.probs = predict(cv.fit, newdata=test, type="response")
+test$cv.predict<-ifelse(test$cv.probs>0.5,1,0)
+table(test$cv.predict, test$quality)
+
+test_roc = roc(test$quality ~ test$bic.predict, plot = TRUE, print.auc = TRUE)
+cv_auc<-test_roc$auc
+cat('testerrorrate for cv:',1-mean(test$cv.predict==test$quality),'\n')
+
+cm_eval = function(cm) {
+    list(
+        accur = sum(diag(cm)) / sum(cm),
+        recall = cm[2,2] / sum(cm[2,]),
+        precision = cm[2,2] / sum(cm[,2])
+    )
+}
+
+cat('accuracy for aic:',cm_eval(table(test$aic.predict, test$quality))$accur,'\n')
+cat('recall for aic:',cm_eval(table(test$aic.predict, test$quality))$recall,'\n')
+cat('precision for aic:',cm_eval(table(test$aic.predict, test$quality))$precision,'\n')
+
+cat('accuracy for bic:',cm_eval(table(test$bic.predict, test$quality))$accur,'\n')
+cat('recall for bic:',cm_eval(table(test$bic.predict, test$quality))$recall,'\n')
+cat('precision for bic:',cm_eval(table(test$bic.predict, test$quality))$precision,'\n')
+
+cat('accuracy for cv:',cm_eval(table(test$cv.predict, test$quality))$accur,'\n')
+cat('recall for cv:',cm_eval(table(test$cv.predict, test$quality))$recall,'\n')
+cat('precision for cv:',cm_eval(table(test$cv.predict, test$quality))$precision,'\n')
+
+#IC, test error rate, accuracy, recall, precision, AUC
+white_models<-rbind(white_models,c('AIC',1-mean(test$aic.predict==test$quality),cm_eval(table(test$aic.predict, test$quality))$accur,cm_eval(table(test$aic.predict, test$quality))$recall,cm_eval(table(test$aic.predict, test$quality))$precision,aic_auc))
+
+white_models<-rbind(white_models,c('BIC',1-mean(test$bic.predict==test$quality),cm_eval(table(test$bic.predict, test$quality))$accur,cm_eval(table(test$bic.predict, test$quality))$recall,cm_eval(table(test$bic.predict, test$quality))$precision,bic_auc))
+
+white_models<-rbind(white_models,c('CV',1-mean(test$cv.predict==test$quality),cm_eval(table(test$cv.predict, test$quality))$accur,cm_eval(table(test$cv.predict, test$quality))$recall,cm_eval(table(test$cv.predict, test$quality))$precision,cv_auc))
+
+names(white_models)[1]<-'model'
+names(white_models)[2]<-'test_error_rate'
+names(white_models)[3]<-'accuracy'
+names(white_models)[4]<-'recall'
+names(white_models)[5]<-'precision'
+names(white_models)[6]<-'auc'
+```
+
+# Red dataset subset selection for logistic regression
+```{r}
+red.bglm <- red[, c("fixed.acidity","volatile.acidity","citric.acid","residual.sugar","chlorides","free.sulfur.dioxide","total.sulfur.dioxide","pH","sulphates","alcohol","quality")]
+red.bglm<-rename(red.bglm, y=quality)
+
+best.logit <- bestglm(red.bglm,
+                IC = "AIC",              
+                family=binomial,
+                method = "exhaustive")
+
+
+par(mfrow=c(2,2))
+plot((best.logit$Subsets)$AIC,xlab="Number of Variables",ylab="AIC",type='l')
+points((which.min((best.logit$Subsets)$AIC)-1),(best.logit$Subsets)$AIC[which.min((best.logit$Subsets)$AIC)-1],col="red",cex=2,pch=20)
+
+
+best.logit <- bestglm(red.bglm,
+                IC = "BIC",                 # Information criteria for
+                family=binomial,
+                method = "exhaustive")
+
+
+plot((best.logit$Subsets)$BIC,xlab="Number of Variables",ylab="BIC",type='l')
+points((which.min((best.logit$Subsets)$BIC)-1),(best.logit$Subsets)$BIC[which.min((best.logit$Subsets)$BIC)-1],col="red",cex=2,pch=20)
+
+
+
+# Looking at CV model
+
+best.logit <- bestglm(Xy = red.bglm, IC="CV", family=binomial)
+
+plot((best.logit$Subsets)$CV,xlab="Number of Variables",ylab="CV",type='l')
+points((which.min((best.logit$Subsets)$CV)-1),(best.logit$Subsets)$CV[which.min((best.logit$Subsets)$CV)-1],col="red",cex=2,pch=20)
+
+```
+
+# Compare these logistic models for red dataset
+```{r}
+set.seed(1)
+train_rows=sample(1:nrow(red), nrow(red)/2)
+train=red[train_rows, ]
+test=red[-train_rows, ]
+
+
+aic.fit=glm(quality~fixed.acidity+volatile.acidity+residual.sugar+free.sulfur.dioxide+total.sulfur.dioxide+sulphates+alcohol, family=binomial, data=train)
+test$aic.probs = predict(aic.fit, newdata=test, type="response")
+test$aic.predict<-ifelse(test$aic.probs>0.5,1,0)
+table(test$aic.predict, test$quality)
+
+test_roc = roc(test$quality ~ test$aic.predict, plot = TRUE, print.auc = TRUE)
+aic_auc<-test_roc$auc
+cat('testerrorrate for aic:',1-mean(test$aic.predict==test$quality),'\n')
+
+
+bic.fit=glm(quality~fixed.acidity+volatile.acidity+residual.sugar+free.sulfur.dioxide+sulphates+alcohol, family=binomial, data=train)
+test$bic.probs = predict(bic.fit, newdata=test, type="response")
+test$bic.predict<-ifelse(test$bic.probs>0.5,1,0)
+table(test$bic.predict, test$quality)
+
+test_roc = roc(test$quality ~ test$bic.predict, plot = TRUE, print.auc = TRUE)
+bic_auc<-test_roc$auc
+cat('testerrorrate for bic:',1-mean(test$bic.predict==test$quality),'\n')
+
+
+cv.fit=glm(quality~volatile.acidity+chlorides+free.sulfur.dioxide+sulphates+alcohol+total.sulfur.dioxide, family=binomial, data=train)
+test$cv.probs = predict(cv.fit, newdata=test, type="response")
+test$cv.predict<-ifelse(test$cv.probs>0.5,1,0)
+table(test$cv.predict, test$quality)
+
+test_roc = roc(test$quality ~ test$bic.predict, plot = TRUE, print.auc = TRUE)
+cv_auc<-test_roc$auc
+cat('testerrorrate for cv:',1-mean(test$cv.predict==test$quality),'\n')
+
+
+cm_eval = function(cm) {
+    list(
+        accur = sum(diag(cm)) / sum(cm),
+        recall = cm[2,2] / sum(cm[2,]),
+        precision = cm[2,2] / sum(cm[,2])
+    )
+}
+
+cat('accuracy for aic:',cm_eval(table(test$aic.predict, test$quality))$accur,'\n')
+cat('recall for aic:',cm_eval(table(test$aic.predict, test$quality))$recall,'\n')
+cat('precision for aic:',cm_eval(table(test$aic.predict, test$quality))$precision,'\n')
+
+cat('accuracy for bic:',cm_eval(table(test$bic.predict, test$quality))$accur,'\n')
+cat('recall for bic:',cm_eval(table(test$bic.predict, test$quality))$recall,'\n')
+cat('precision for bic:',cm_eval(table(test$bic.predict, test$quality))$precision,'\n')
+
+cat('accuracy for cv:',cm_eval(table(test$cv.predict, test$quality))$accur,'\n')
+cat('recall for cv:',cm_eval(table(test$cv.predict, test$quality))$recall,'\n')
+cat('precision for cv:',cm_eval(table(test$cv.predict, test$quality))$precision,'\n')
+
+
+red_models<-rbind(red_models,c('AIC',1-mean(test$aic.predict==test$quality),cm_eval(table(test$aic.predict, test$quality))$accur,cm_eval(table(test$aic.predict, test$quality))$recall,cm_eval(table(test$aic.predict, test$quality))$precision,aic_auc))
+
+red_models<-rbind(red_models,c('BIC',1-mean(test$bic.predict==test$quality),cm_eval(table(test$bic.predict, test$quality))$accur,cm_eval(table(test$bic.predict, test$quality))$recall,cm_eval(table(test$bic.predict, test$quality))$precision,bic_auc))
+
+red_models<-rbind(red_models,c('CV',1-mean(test$cv.predict==test$quality),cm_eval(table(test$cv.predict, test$quality))$accur,cm_eval(table(test$cv.predict, test$quality))$recall,cm_eval(table(test$cv.predict, test$quality))$precision,cv_auc))
+
+
+names(red_models)[1]<-'model'
+names(red_models)[2]<-'test_error_rate'
+names(red_models)[3]<-'accuracy'
+names(red_models)[4]<-'recall'
+names(red_models)[5]<-'precision'
+names(red_models)[6]<-'auc'
+
+```
+BIC has better scores for precision, accuracy, and recall. AIC has better test error rate. AIC has better AUC than BIC.
+
+# LDA for white dataset
+```{r}
+library(MASS)
+
+set.seed(1)
+train_rows=sample(1:nrow(white), nrow(white)/2)
+train=white[train_rows, ]
+test=white[-train_rows, ]
+
+
+lda.fit = lda(quality~., data=train)
+
+# see distributions
+plot(lda.fit, type="both")
+
+lda.test = predict(lda.fit, newdata = test)
+test$lda = lda.test$class
+table(test$lda, test$quality)
+
+cat('testerrorrate for LDA:',1-mean(test$lda==test$quality),'\n')
+
+
+cat('accuracy for LDA:',cm_eval(table(test$lda, test$quality))$accur,'\n')
+cat('recall for LDA:',cm_eval(table(test$lda, test$quality))$recall,'\n')
+cat('precision for LDA:',cm_eval(table(test$lda, test$quality))$precision,'\n')
+
+white_models<-rbind(white_models, c('LDA',1-mean(test$lda==test$quality),cm_eval(table(test$lda, test$quality))$accur,cm_eval(table(test$lda, test$quality))$recall,cm_eval(table(test$lda, test$quality))$precision,NA))
+
+```
+# LDA for red dataset
+```{r}
+
+set.seed(1)
+train_rows=sample(1:nrow(red), nrow(red)/2)
+train=red[train_rows, ]
+test=red[-train_rows, ]
+
+
+lda.fit = lda(quality~., data=train)
+
+# see distributions
+plot(lda.fit, type="both")
+
+lda.test = predict(lda.fit, newdata = test)
+
+lda.test$original$discriminant.functions
+
+test$lda = lda.test$class
+table(test$lda, test$quality)
+
+cat('testerrorrate for LDA:',1-mean(test$lda==test$quality),'\n')
+
+
+cat('accuracy for LDA:',cm_eval(table(test$lda, test$quality))$accur,'\n')
+cat('recall for LDA:',cm_eval(table(test$lda, test$quality))$recall,'\n')
+cat('precision for LDA:',cm_eval(table(test$lda, test$quality))$precision,'\n')
+
+
+red_models<-rbind(red_models, c('LDA',1-mean(test$lda==test$quality),cm_eval(table(test$lda, test$quality))$accur,cm_eval(table(test$lda, test$quality))$recall,cm_eval(table(test$lda, test$quality))$precision,NA))
+
+
+```
+# QDA for white dataset
+```{r}
+
+set.seed(1)
+train_rows=sample(1:nrow(white), nrow(white)/2)
+train=white[train_rows, ]
+test=white[-train_rows, ]
+
+qda.fit = qda(quality~., data=train)
+qda.test = predict(qda.fit, newdata=test)
+test$qda = qda.test$class
+table(test$qda, test$quality)
+
+cat('testerrorrate for QDA:',1-mean(test$qda==test$quality),'\n')
+
+
+cat('accuracy for QDA:',cm_eval(table(test$qda, test$quality))$accur,'\n')
+cat('recall for QDA:',cm_eval(table(test$qda, test$quality))$recall,'\n')
+cat('precision for QDA:',cm_eval(table(test$qda, test$quality))$precision,'\n')
+
+
+white_models<-rbind(white_models, c('QDA',1-mean(test$qda==test$quality),cm_eval(table(test$qda, test$quality))$accur,cm_eval(table(test$qda, test$quality))$recall,cm_eval(table(test$qda, test$quality))$precision,NA))
+```
+# QDA for red dataset
+```{r}
+
+set.seed(1)
+train_rows=sample(1:nrow(red), nrow(red)/2)
+train=red[train_rows, ]
+test=red[-train_rows, ]
+
+qda.fit = qda(quality~., data=train)
+qda.test = predict(qda.fit, newdata=test)
+test$qda = qda.test$class
+table(test$qda, test$quality)
+
+
+cat('testerrorrate for QDA:',1-mean(test$qda==test$quality),'\n')
+
+
+
+cat('accuracy for QDA:',cm_eval(table(test$qda, test$quality))$accur,'\n')
+cat('recall for QDA:',cm_eval(table(test$qda, test$quality))$recall,'\n')
+cat('precision for QDA:',cm_eval(table(test$qda, test$quality))$precision,'\n')
+
+
+red_models<-rbind(red_models, c('QDA',1-mean(test$qda==test$quality),cm_eval(table(test$qda, test$quality))$accur,cm_eval(table(test$qda, test$quality))$recall,cm_eval(table(test$qda, test$quality))$precision,NA))
+```
+#naive bayes for white dataset
+```{r}
+set.seed(1)
+train_rows=sample(1:nrow(white), nrow(white)/2)
+train=white[train_rows, ]
+test=white[-train_rows, ]
+
+#naive bayes
+library(e1071)
+m_nb = naiveBayes(quality~., data = train)
+p_nb=predict(m_nb, newdata = test, type = c("class"))
+
+#error
+cat('test error rate for naive bayes is',1-(sum(test$quality==p_nb)/nrow(test)))
+
+white_models<-rbind(white_models, c('naive bayes',1-(sum(test$quality==p_nb)/nrow(test))))
+```
+
+#naive bayes for red dataset
+```{r}
+set.seed(1)
+train_rows=sample(1:nrow(red), nrow(red)/2)
+train=red[train_rows, ]
+test=red[-train_rows, ]
+
+#naive bayes
+library(e1071)
+m_nb = naiveBayes(quality~., data = train)
+p_nb=predict(m_nb, newdata = test, type = c("class"))
+
+#error
+cat('test error rate for naive bayes is',1-(sum(test$quality==p_nb)/nrow(test)))
+
+red_models<-rbind(red_models, c('naive bayes',1-(sum(test$quality==p_nb)/nrow(test))))
+```
+
+#random forest and tree for white dataset
+```{r}
+library(tree)
+
+white$quality<-as.factor(white$quality)
+
+#Tree
+set.seed(1)
+train_rows=sample(1:nrow(white), nrow(white)/2)
+train=white[train_rows, ]
+test=white[-train_rows, ]
+
+tree.white=tree(quality~., data=train)
+plot(tree.white)
+text(tree.white,pretty=0)
+
+yhat=predict(tree.white,newdata=test,type="class")
+
+cat('The test error rate for a tree is:',1-mean(yhat==test$quality),'\n')
+
+white_models<-rbind(white_models, c('tree',1-mean(yhat==test$quality),NA, NA ,NA, NA))
+
+#pruned tree
+
+#pruned decision tree
+library(rpart)
+m_class_tree = rpart(quality~., data = train,  method = 'class')
+cp_class_tree =m_class_tree$cptable[which.min(m_class_tree$cptable[,"xerror"]),"CP"]
+m_class_tree_pruned = prune(m_class_tree, cp = cp_class_tree)
+tree <- rpart(quality ~ ., data = train)
+p_class_tree=predict(m_class_tree_pruned, newdata = test, type = 'class')
+#error
+1-sum((test$quality==p_class_tree)/nrow(test))
+#barplot variable importance plot
+(vi_tree <- tree$variable.importance)
+par(mar=c(9,4,4,4))
+barplot(vi_tree, horiz = FALSE, las = 2)
+
+cat('The test eror rate for pruned tree is:',1-sum((test$quality==p_class_tree)/nrow(test)),'\n')
+
+white_models<-rbind(white_models, c('Pruned Tree',1-sum((test$quality==p_class_tree)/nrow(test)),NA, NA, NA , NA))
+
+#random forest
+
+library(randomForest)
+
+set.seed(1)
+bag.white <- randomForest(quality ~ ., data = train, mtry = 10,importance = TRUE)
+
+yhat <- predict(bag.white, newdata = test,type='class')
+cat('The test error rate for random forest is:',1-mean(yhat==test$quality),'\n')
+
+white_models<-rbind(white_models, c('Random Forest',1-mean(yhat==test$quality),NA, NA, NA , NA))
+
+
+importance(bag.white)
+varImpPlot(bag.white)
+
+train$quality<-as.character(train$quality)
+test$quality<-as.factor(test$quality)
+#boosting
+library(gbm)
+set.seed(1)
+boost.white=gbm(quality~.,data=train,distribution="bernoulli",n.trees=5000,interaction.depth=4)
+yhat.boost=predict(boost.white,newdata=test,n.trees=5000,type="response")
+yhat.boost<-round(yhat.boost)
+
+cat('the test error rate for a boosted tree is',1-mean(yhat.boost==test$quality),'\n')
+
+white_models<-rbind(white_models,c('boosted tree',1-mean(yhat.boost==test$quality), NA, NA, NA, NA))
+
+```
+#random forest and tree for red dataset 
+```{r}
+library(tree)
+
+red$quality<-as.factor(red$quality)
+
+#Tree
+set.seed(1)
+train_rows=sample(1:nrow(red), nrow(red)/2)
+train=red[train_rows, ]
+test=red[-train_rows, ]
+
+tree.red=tree(quality~., data=train)
+plot(tree.red)
+text(tree.red,pretty=0)
+
+yhat=predict(tree.red,newdata=test,type="class")
+
+cat('The test error rate for a tree is:',1-mean(yhat==test$quality),'\n')
+
+red_models<-rbind(red_models, c('tree',1-mean(yhat==test$quality),NA, NA ,NA, NA))
+
+#pruned tree
+
+library(rpart)
+m_class_tree = rpart(quality~., data = train,  method = 'class')
+cp_class_tree =m_class_tree$cptable[which.min(m_class_tree$cptable[,"xerror"]),"CP"]
+m_class_tree_pruned = prune(m_class_tree, cp = cp_class_tree)
+tree <- rpart(quality ~ ., data = train)
+p_class_tree=predict(m_class_tree_pruned, newdata = test, type = 'class')
+#error
+1-sum((test$quality==p_class_tree)/nrow(test))
+#barplot variable importance plot
+(vi_tree <- tree$variable.importance)
+par(mar=c(9,4,4,4))
+barplot(vi_tree, horiz = FALSE, las = 2)
+
+
+cat('The test eror rate for pruned tree is:',1-sum((test$quality==p_class_tree)/nrow(test)),'\n')
+
+red_models<-rbind(red_models, c('Pruned Tree',1-sum((test$quality==p_class_tree)/nrow(test)),NA, NA, NA , NA))
+
+#random forest
+
+library(randomForest)
+
+set.seed(1)
+bag.red <- randomForest(quality ~ ., data = train, mtry = 8,importance = TRUE)
+
+yhat <- predict(bag.red, newdata = test,type='class')
+cat('The test error rate for random forest is:',1-mean(yhat==test$quality),'\n')
+
+red_models<-rbind(red_models, c('Random Forest',1-mean(yhat==test$quality),NA, NA, NA , NA))
+
+
+importance(bag.red)
+varImpPlot(bag.red)
+
+train$quality<-as.character(train$quality)
+test$quality<-as.factor(test$quality)
+#boosting
+library(gbm)
+set.seed(1)
+boost.red=gbm(quality~.,data=train,distribution="bernoulli",n.trees=5000,interaction.depth=4)
+yhat.boost=predict(boost.red,newdata=test,n.trees=5000, type="response")
+
+yhat.boost<-round(yhat.boost)
+
+cat('the test error rate for a boosted tree is',1-mean(yhat.boost==test$quality),'\n')
+
+red_models<-rbind(red_models,c('boosted tree',1-mean(yhat.boost==test$quality), NA, NA, NA, NA))
+```
+
+# Comparing all models test error rates
+```{r}
+ggplot(white_models,aes(x=model, y = test_error_rate, colour=model))+
+    geom_point()
+
+ggplot(red_models,aes(x=model, y = test_error_rate, colour=model))+
+    geom_point()
+
+white_models
+red_models
+```
+
