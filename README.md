@@ -1,0 +1,3 @@
+Using machine learning methods in R, we sought to discover what characteristics of wine determine a high-quality or low-quality wine, such as acidity, sweetness, and alcohol content. The dataset we used only contains red and white wine variants from the Portugese wine Vinho Verde. We chose to treat this as a classification problem. We tested several models to best predict the quality of wine: logistic regression, linear discriminant analysis (LDA), quadratic discriminant analysis (QDA), Naive Bayes (NB), and decision trees.
+
+Please read the attached report to see Exploratory Data Analysis, Data Analysis and Model Selection, Interpretation, and Conclusion.
